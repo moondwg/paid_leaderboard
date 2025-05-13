@@ -46,6 +46,28 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) =>
   res.json({ received: true });
 });
 
+app.get("/leaderboard", async (req, res) => {
+  try {
+    const snapshot = await db.ref("payments").once("value");
+    const data = snapshot.val();
+
+    if (!data) return res.json([]);
+
+    // Convert to array and sort by total descending
+    const leaderboard = Object.values(data)
+      .sort((a, b) => b.total - a.total)
+      .map(entry => ({
+        name: entry.name,
+        score: (entry.total / 100).toFixed(2), // Convert cents to dollars
+      }));
+
+    res.json(leaderboard);
+  } catch (error) {
+    console.error("Leaderboard fetch error:", error);
+    res.status(500).json({ error: "Failed to fetch leaderboard" });
+  }
+});
+
 app.get("/", (req, res) => res.send("Stripe Webhook Server Running"));
 
 const PORT = process.env.PORT || 3000;
