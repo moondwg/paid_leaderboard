@@ -102,6 +102,9 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
+app.options("*", cors()); 
+
+
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
   try {
