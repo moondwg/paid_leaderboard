@@ -46,6 +46,43 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) =>
   res.json({ received: true });
 });
 
+
+// Step 3: Create Stripe Checkout Session
+app.post("/create-checkout-session", async (req, res) => {
+  const { name, amount } = req.body;
+
+  if (!name || !amount) {
+    return res.status(400).json({ error: "Name and amount are required" });
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: "Leaderboard Donation",
+            },
+            unit_amount: amount, // in cents
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      success_url: "https://rankwager.com?success=true",
+      cancel_url: "https://rankwager.com?canceled=true",
+      metadata: { name },
+    });
+
+    res.json({ id: session.id });
+  } catch (error) {
+    console.error("Stripe session error:", error.message);
+    res.status(500).json({ error: "Failed to create checkout session" });
+  }
+});
+
 app.get("/leaderboard", async (req, res) => {
   try {
     const snapshot = await db.ref("payments").once("value");
