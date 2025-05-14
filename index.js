@@ -22,7 +22,7 @@ const db = admin.database();
 // Enable CORS for all non-webhook routes
 
 app.use(cors({
-  origin: ["https://rankwager.com", "https://www.rankwager.com", "https://api.rankwager.com"],
+  origin: ["https://rankwager.com", "https://api.rankwager.com", "https://www.api.rankwager.com"],
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
