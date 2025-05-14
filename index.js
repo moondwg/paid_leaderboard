@@ -3,6 +3,7 @@ import admin from "firebase-admin";
 import Stripe from "stripe";
 import bodyParser from "body-parser";
 import fs from "fs";
+import cors from "cors";
 
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -17,6 +18,10 @@ admin.initializeApp({
 });
 
 const db = admin.database();
+
+app.use(cors({
+  origin: "https://rankwager.com" // <--- ADD THIS
+}));
 
 // Parse webhook raw body
 app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) => {
