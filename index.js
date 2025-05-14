@@ -20,12 +20,12 @@ admin.initializeApp({
 const db = admin.database();
 
 // Enable CORS for all non-webhook routes
+
 app.use(cors({
-  origin: "https://rankwager.com",
+  origin: ["https://rankwager.com", "https://api.rankwager.com"],
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
-
 // Only skip JSON body parsing for webhook route
 app.use((req, res, next) => {
   if (req.originalUrl === "/webhook") {
