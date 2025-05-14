@@ -19,11 +19,23 @@ admin.initializeApp({
 
 const db = admin.database();
 
+// Enable CORS for all non-webhook routes
 app.use(cors({
-  origin: "https://rankwager.com" // <--- ADD THIS
+  origin: "https://rankwager.com",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// Parse webhook raw body
+// Only skip JSON body parsing for webhook route
+app.use((req, res, next) => {
+  if (req.originalUrl === "/webhook") {
+    next();
+  } else {
+    express.json()(req, res, next);
+  }
+});
+
+// Stripe webhook (must use raw body parser)
 app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) => {
   const sig = req.headers["stripe-signature"];
   let event;
@@ -51,8 +63,7 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) =>
   res.json({ received: true });
 });
 
-
-// Step 3: Create Stripe Checkout Session
+// Stripe Checkout session route
 app.post("/create-checkout-session", async (req, res) => {
   const { name, amount } = req.body;
 
@@ -88,6 +99,7 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
+// Leaderboard data
 app.get("/leaderboard", async (req, res) => {
   try {
     const snapshot = await db.ref("payments").once("value");
@@ -95,12 +107,11 @@ app.get("/leaderboard", async (req, res) => {
 
     if (!data) return res.json([]);
 
-    // Convert to array and sort by total descending
     const leaderboard = Object.values(data)
       .sort((a, b) => b.total - a.total)
       .map(entry => ({
         name: entry.name,
-        score: (entry.total / 100).toFixed(2), // Convert cents to dollars
+        score: (entry.total / 100).toFixed(2),
       }));
 
     res.json(leaderboard);
