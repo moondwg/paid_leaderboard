@@ -74,6 +74,14 @@ app.post("/create-checkout-session", async (req, res) => {
     return res.status(400).json({ error: "Name and amount are required" });
   }
 
+  // Parse amount as float, multiply by 100, round to int cents
+  const amountInCents = Math.round(parseFloat(amount) * 100);
+
+  // Validate amount >= 50 cents
+  if (isNaN(amountInCents) || amountInCents < 50) {
+    return res.status(400).json({ error: "Amount must be a valid number and at least $0.50" });
+  }
+
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
@@ -84,7 +92,7 @@ app.post("/create-checkout-session", async (req, res) => {
             product_data: {
               name: "Leaderboard Donation",
             },
-            unit_amount: amount, // in cents
+            unit_amount: amountInCents, // Correct: amount in cents, integer
           },
           quantity: 1,
         },
