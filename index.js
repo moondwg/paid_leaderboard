@@ -19,15 +19,29 @@ admin.initializeApp({
 
 const db = admin.database();
 
-// Enable CORS for all non-webhook routes
-
-app.use(cors({
-  origin: ["https://rankwager.com", "https://api.rankwager.com", "https://www.api.rankwager.com"],
+// CORS options
+const corsOptions = {
+  origin: [
+    "https://rankwager.com",
+    "https://api.rankwager.com",
+    "https://www.api.rankwager.com"
+  ],
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+  credentials: true,
+};
 
+// Preflight OPTIONS requests handling
+app.options("*", cors(corsOptions));
+
+// Apply CORS globally for all routes except webhook
+app.use((req, res, next) => {
+  if (req.originalUrl === "/webhook") {
+    next();
+  } else {
+    cors(corsOptions)(req, res, next);
+  }
+});
 
 // Only skip JSON body parsing for webhook route
 app.use((req, res, next) => {
@@ -74,10 +88,8 @@ app.post("/create-checkout-session", async (req, res) => {
     return res.status(400).json({ error: "Name and amount are required" });
   }
 
-  // Parse amount as float, multiply by 100, round to int cents
   const amountInCents = Math.round(parseFloat(amount) * 100);
 
-  // Validate amount >= 50 cents
   if (isNaN(amountInCents) || amountInCents < 50) {
     return res.status(400).json({ error: "Amount must be a valid number and at least $0.50" });
   }
@@ -92,7 +104,7 @@ app.post("/create-checkout-session", async (req, res) => {
             product_data: {
               name: "Leaderboard Donation",
             },
-            unit_amount: amountInCents, // Correct: amount in cents, integer
+            unit_amount: amountInCents,
           },
           quantity: 1,
         },
@@ -109,9 +121,6 @@ app.post("/create-checkout-session", async (req, res) => {
     res.status(500).json({ error: "Failed to create checkout session" });
   }
 });
-
-app.options("*", cors()); 
-
 
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
