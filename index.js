@@ -127,8 +127,12 @@ app.get("/leaderboard", async (req, res) => {
   try {
     const snapshot = await db.ref("payments").once("value");
     const data = snapshot.val();
+    console.log("Leaderboard data raw from DB:", data);
 
-    if (!data) return res.json([]);
+    if (!data) {
+      console.log("No leaderboard data found, sending empty array");
+      return res.json([]);
+    }
 
     const leaderboard = Object.values(data)
       .sort((a, b) => b.total - a.total)
@@ -137,12 +141,14 @@ app.get("/leaderboard", async (req, res) => {
         score: (entry.total / 100).toFixed(2),
       }));
 
+    console.log("Formatted leaderboard:", leaderboard);
     res.json(leaderboard);
   } catch (error) {
     console.error("Leaderboard fetch error:", error);
     res.status(500).json({ error: "Failed to fetch leaderboard" });
   }
 });
+
 
 app.get("/", (req, res) => res.send("Stripe Webhook Server Running"));
 
