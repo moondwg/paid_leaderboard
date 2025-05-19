@@ -53,7 +53,7 @@ app.use((req, res, next) => {
 });
 
 // Stripe webhook (must use raw body parser)
-app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) => {
+app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];
   let event;
 
@@ -68,17 +68,26 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) =>
     const session = event.data.object;
     const name = session.metadata?.name || "Anonymous";
     const amount = session.amount_total;
+    const timestamp = Date.now();
 
-    db.ref(`payments/${name}`).set({
+    const entry = {
       name,
       total: amount,
-    });
+      timestamp,
+    };
 
-    console.log(`Logged payment from ${name}: $${(amount / 100).toFixed(2)}`);
+    try {
+      // Push a new unique entry instead of using name as the key
+      await db.ref("payments").push(entry);
+      console.log(`✅ Stored payment: ${name} - $${(amount / 100).toFixed(2)}`);
+    } catch (error) {
+      console.error("❌ Firebase write error:", error.message);
+    }
   }
 
   res.json({ received: true });
 });
+
 
 // Stripe Checkout session route
 app.post("/create-checkout-session", async (req, res) => {
@@ -127,27 +136,49 @@ app.get("/leaderboard", async (req, res) => {
   try {
     const snapshot = await db.ref("payments").once("value");
     const data = snapshot.val();
-    console.log("Leaderboard data raw from DB:", data);
+    console.log("Raw payments data from DB:", data);
 
     if (!data) {
-      console.log("No leaderboard data found, sending empty array");
+      console.log("No leaderboard data found.");
       return res.json([]);
     }
 
-    const leaderboard = Object.values(data)
-      .sort((a, b) => b.total - a.total)
-      .map(entry => ({
-        name: entry.name,
-        score: (entry.total / 100).toFixed(2),
-      }));
+    // Step 1: Aggregate totals per user
+    const aggregated = {};
 
-    console.log("Formatted leaderboard:", leaderboard);
-    res.json(leaderboard);
+    for (const key in data) {
+      const entry = data[key];
+      if (!entry.name || !entry.total) continue;
+
+      if (!aggregated[entry.name]) {
+        aggregated[entry.name] = 0;
+      }
+
+      aggregated[entry.name] += entry.total;
+    }
+
+    // Step 2: Sort by total descending
+    const leaderboard = Object.entries(aggregated)
+      .map(([name, total]) => ({
+        name,
+        score: (total / 100).toFixed(2), // Convert cents to dollars
+      }))
+      .sort((a, b) => b.score - a.score);
+
+    // Step 3: Add ranks
+    const ranked = leaderboard.map((entry, index) => ({
+      rank: index + 1,
+      ...entry,
+    }));
+
+    console.log("Final leaderboard:", ranked);
+    res.json(ranked);
   } catch (error) {
     console.error("Leaderboard fetch error:", error);
     res.status(500).json({ error: "Failed to fetch leaderboard" });
   }
 });
+
 
 
 app.get("/", (req, res) => res.send("Stripe Webhook Server Running"));
