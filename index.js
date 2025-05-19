@@ -138,6 +138,23 @@ app.post("/create-checkout-session", async (req, res) => {
 });
 
 
+app.get("/payments/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const snapshot = await db.ref(`payments/${id}`).once("value");
+    const data = snapshot.val();
+
+    if (!data) return res.status(404).json({ error: "Payment not found" });
+
+    res.json(data);
+  } catch (error) {
+    console.error("Payment fetch error:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
   try {
