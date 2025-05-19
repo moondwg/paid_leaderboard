@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import bodyParser from "body-parser";
 import fs from "fs";
 import cors from "cors";
+import { v4 as uuidv4 } from "uuid";
+
 
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -53,6 +55,7 @@ app.use((req, res, next) => {
 });
 
 // Stripe webhook (must use raw body parser)
+
 app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];
   let event;
@@ -65,25 +68,27 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, r
   }
 
   if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-    const name = session.metadata?.name || "Anonymous";
-    const amount = session.amount_total;
-    const timestamp = Date.now();
+  const session = event.data.object;
+  const name = session.metadata?.name || "Anonymous";
+  const amount = session.amount_total;
+  const timestamp = Date.now();
 
-    const entry = {
-      name,
-      total: amount,
-      timestamp,
-    };
+  const paymentId = session.metadata?.paymentId || uuidv4(); // ✅ This is correct
 
-    try {
-      // Push a new unique entry instead of using name as the key
-      await db.ref("payments").push(entry);
-      console.log(`✅ Stored payment: ${name} - $${(amount / 100).toFixed(2)}`);
-    } catch (error) {
-      console.error("❌ Firebase write error:", error.message);
-    }
+  const entry = {
+    id: paymentId,
+    name,
+    total: amount,
+    timestamp,
+  };
+
+  try {
+    await db.ref(`payments/${paymentId}`).set(entry); // ✅ Using paymentId as key
+    console.log(`✅ Stored payment: ${name} - $${(amount / 100).toFixed(2)}`);
+  } catch (error) {
+    console.error("❌ Firebase write error:", error.message);
   }
+}
 
   res.json({ received: true });
 });
@@ -92,6 +97,7 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, r
 // Stripe Checkout session route
 app.post("/create-checkout-session", async (req, res) => {
   const { name, amount } = req.body;
+  const paymentId = uuidv4();
 
   if (!name || !amount) {
     return res.status(400).json({ error: "Name and amount are required" });
@@ -119,9 +125,9 @@ app.post("/create-checkout-session", async (req, res) => {
         },
       ],
       mode: "payment",
-      success_url: "https://rankwager.com?success=true",
+      success_url: `https://rankwager.com?success=true&id=${paymentId}`,
       cancel_url: "https://rankwager.com?canceled=true",
-      metadata: { name },
+      metadata: { name, paymentId },
     });
 
     res.json({ id: session.id });
@@ -130,6 +136,7 @@ app.post("/create-checkout-session", async (req, res) => {
     res.status(500).json({ error: "Failed to create checkout session" });
   }
 });
+
 
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
