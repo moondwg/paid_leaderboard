@@ -6,7 +6,6 @@ import fs from "fs";
 import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
 
-
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -54,8 +53,15 @@ app.use((req, res, next) => {
   }
 });
 
-// Stripe webhook (must use raw body parser)
+// Helper: assign tier based on total amount donated (in dollars)
+function getTier(amount) {
+  if (amount >= 200) return "Whale";
+  if (amount >= 50) return "Shark";
+  if (amount >= 1) return "Shrimp";
+  return "Unknown";
+}
 
+// Stripe webhook (must use raw body parser)
 app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];
   let event;
@@ -68,31 +74,31 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, r
   }
 
   if (event.type === "checkout.session.completed") {
-  const session = event.data.object;
-  const name = session.metadata?.name || "Anonymous";
-  const amount = session.amount_total;
-  const timestamp = Date.now();
+    const session = event.data.object;
+    const name = session.metadata?.name || "Anonymous";
 
-  const paymentId = session.metadata?.paymentId || uuidv4(); // ✅ This is correct
+    // Convert cents to dollars here
+    const amountInDollars = session.amount_total / 100;
 
-  const entry = {
-    id: paymentId,
-    name,
-    total: amount,
-    timestamp,
-  };
+    const paymentId = session.metadata?.paymentId || uuidv4();
 
-  try {
-    await db.ref(`payments/${paymentId}`).set(entry); // ✅ Using paymentId as key
-    console.log(`✅ Stored payment: ${name} - $${(amount / 100).toFixed(2)}`);
-  } catch (error) {
-    console.error("❌ Firebase write error:", error.message);
+    const entry = {
+      id: paymentId,
+      name,
+      total: amountInDollars,  // store dollars directly
+      timestamp: Date.now(),
+    };
+
+    try {
+      await db.ref(`payments/${paymentId}`).set(entry);
+      console.log(`✅ Stored payment: ${name} - $${amountInDollars.toFixed(2)}`);
+    } catch (error) {
+      console.error("❌ Firebase write error:", error.message);
+    }
   }
-}
 
   res.json({ received: true });
 });
-
 
 // Stripe Checkout session route
 app.post("/create-checkout-session", async (req, res) => {
@@ -137,7 +143,7 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
-
+// Get single payment by id
 app.get("/payments/:id", async (req, res) => {
   const { id } = req.params;
   try {
@@ -153,21 +159,17 @@ app.get("/payments/:id", async (req, res) => {
   }
 });
 
-
-
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
   try {
     const snapshot = await db.ref("payments").once("value");
     const data = snapshot.val();
-    console.log("Raw payments data from DB:", data);
 
     if (!data) {
-      console.log("No leaderboard data found.");
       return res.json([]);
     }
 
-    // Step 1: Aggregate totals per user
+    // Aggregate totals per user in dollars
     const aggregated = {};
 
     for (const key in data) {
@@ -178,32 +180,30 @@ app.get("/leaderboard", async (req, res) => {
         aggregated[entry.name] = 0;
       }
 
-      aggregated[entry.name] += entry.total;
+      aggregated[entry.name] += entry.total; // total already in dollars
     }
 
-    // Step 2: Sort by total descending
+    // Sort descending by total
     const leaderboard = Object.entries(aggregated)
       .map(([name, total]) => ({
         name,
-        score: (total / 100).toFixed(2), // Convert cents to dollars
+        score: total.toFixed(2),
       }))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => parseFloat(b.score) - parseFloat(a.score));
 
-    // Step 3: Add ranks
+    // Add ranks and tier
     const ranked = leaderboard.map((entry, index) => ({
       rank: index + 1,
       ...entry,
+      tier: getTier(parseFloat(entry.score)),
     }));
 
-    console.log("Final leaderboard:", ranked);
     res.json(ranked);
   } catch (error) {
     console.error("Leaderboard fetch error:", error);
     res.status(500).json({ error: "Failed to fetch leaderboard" });
   }
 });
-
-
 
 app.get("/", (req, res) => res.send("Stripe Webhook Server Running"));
 
