@@ -268,27 +268,15 @@ app.get("/stats", async (req, res) => {
       });
     }
 
-    const totalsByName = {};
-
-    for (const key in data) {
-      const entry = data[key];
-      if (!entry.name || !entry.total) continue;
-
-      const name = entry.name.trim().toLowerCase(); // Normalize
-
-      if (!totalsByName[name]) {
-        totalsByName[name] = 0;
-      }
-
-      totalsByName[name] += entry.total;
-    }
-
     let shrimpCount = 0;
     let sharkCount = 0;
     let whaleCount = 0;
 
-    for (const name in totalsByName) {
-      const tier = getTier(totalsByName[name]);
+    for (const key in data) {
+      const entry = data[key];
+      if (!entry.total) continue;
+
+      const tier = getTier(entry.total);
 
       if (tier === "Whale") whaleCount++;
       else if (tier === "Shark") sharkCount++;
