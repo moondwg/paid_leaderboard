@@ -1,7 +1,7 @@
 import express from "express";
 import admin from "firebase-admin";
 import Stripe from "stripe";
-import bodyParser from "body-parser";
+import bodyParser from "body-parser"; 
 import fs from "fs";
 import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
@@ -102,15 +102,38 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, r
 
 // Stripe Checkout session route
 app.post("/create-checkout-session", async (req, res) => {
-  const { name, amount } = req.body;
+  const { name, amount, token } = req.body;
   const paymentId = uuidv4();
 
-  if (!name || !amount) {
-    return res.status(400).json({ error: "Name and amount are required" });
+  if (!name || !amount || !token) {
+    return res.status(400).json({ error: "Name, amount, and reCAPTCHA token are required" });
   }
 
-  const amountInCents = Math.round(parseFloat(amount) * 100);
+  // Verify reCAPTCHA token with Google
+  try {
+    const response = await fetch("https://www.google.com/recaptcha/api/siteverify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        secret: process.env.RECAPTCHA_SECRET_KEY,
+        response: token,
+      }),
+    });
 
+    const data = await response.json();
+
+    if (!data.success || (data.score !== undefined && data.score < 0.5)) {
+      return res.status(403).json({ error: "reCAPTCHA verification failed" });
+    }
+  } catch (error) {
+    console.error("reCAPTCHA verification error:", error.message);
+    return res.status(500).json({ error: "Failed to verify reCAPTCHA" });
+  }
+
+  // Validate and convert amount
+  const amountInCents = Math.round(parseFloat(amount) * 100);
   if (isNaN(amountInCents) || amountInCents < 50) {
     return res.status(400).json({ error: "Amount must be a valid number and at least $0.50" });
   }
@@ -122,9 +145,7 @@ app.post("/create-checkout-session", async (req, res) => {
         {
           price_data: {
             currency: "usd",
-            product_data: {
-              name: "Leaderboard Donation",
-            },
+            product_data: { name: "Leaderboard Donation" },
             unit_amount: amountInCents,
           },
           quantity: 1,
@@ -137,11 +158,12 @@ app.post("/create-checkout-session", async (req, res) => {
     });
 
     res.json({ id: session.id });
-  } catch (error) {
-    console.error("Stripe session error:", error.message);
+  } catch (err) {
+    console.error("Stripe error:", err.message);
     res.status(500).json({ error: "Failed to create checkout session" });
   }
 });
+
 
 // Get single payment by id
 app.get("/payments/:id", async (req, res) => {
