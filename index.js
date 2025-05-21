@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import bodyParser from "body-parser";
 import fs from "fs";
 import cors from "cors";
+import { v4 as uuidv4 } from "uuid";
 
 const app = express();
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
@@ -19,15 +20,29 @@ admin.initializeApp({
 
 const db = admin.database();
 
-// Enable CORS for all non-webhook routes
-
-app.use(cors({
-  origin: ["https://rankwager.com", "https://api.rankwager.com", "https://www.api.rankwager.com"],
+// CORS options
+const corsOptions = {
+  origin: [
+    "https://rankwager.com",
+    "https://api.rankwager.com",
+    "https://www.api.rankwager.com"
+  ],
   methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+  credentials: true,
+};
 
+// Preflight OPTIONS requests handling
+app.options("*", cors(corsOptions));
+
+// Apply CORS globally for all routes except webhook
+app.use((req, res, next) => {
+  if (req.originalUrl === "/webhook") {
+    next();
+  } else {
+    cors(corsOptions)(req, res, next);
+  }
+});
 
 // Only skip JSON body parsing for webhook route
 app.use((req, res, next) => {
@@ -38,8 +53,16 @@ app.use((req, res, next) => {
   }
 });
 
+// Helper: assign tier based on total amount donated (in dollars)
+function getTier(amount) {
+  if (amount >= 200) return "Whale";
+  if (amount >= 50) return "Shark";
+  if (amount >= 1) return "Shrimp";
+  return "Unknown";
+}
+
 // Stripe webhook (must use raw body parser)
-app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) => {
+app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];
   let event;
 
@@ -53,14 +76,25 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) =>
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
     const name = session.metadata?.name || "Anonymous";
-    const amount = session.amount_total;
 
-    db.ref(`payments/${name}`).set({
+    // Convert cents to dollars here
+    const amountInDollars = session.amount_total / 100;
+
+    const paymentId = session.metadata?.paymentId || uuidv4();
+
+    const entry = {
+      id: paymentId,
       name,
-      total: amount,
-    });
+      total: amountInDollars,  // store dollars directly
+      timestamp: Date.now(),
+    };
 
-    console.log(`Logged payment from ${name}: $${(amount / 100).toFixed(2)}`);
+    try {
+      await db.ref(`payments/${paymentId}`).set(entry);
+      console.log(`✅ Stored payment: ${name} - $${amountInDollars.toFixed(2)}`);
+    } catch (error) {
+      console.error("❌ Firebase write error:", error.message);
+    }
   }
 
   res.json({ received: true });
@@ -69,15 +103,14 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), (req, res) =>
 // Stripe Checkout session route
 app.post("/create-checkout-session", async (req, res) => {
   const { name, amount } = req.body;
+  const paymentId = uuidv4();
 
   if (!name || !amount) {
     return res.status(400).json({ error: "Name and amount are required" });
   }
 
-  // Parse amount as float, multiply by 100, round to int cents
   const amountInCents = Math.round(parseFloat(amount) * 100);
 
-  // Validate amount >= 50 cents
   if (isNaN(amountInCents) || amountInCents < 50) {
     return res.status(400).json({ error: "Amount must be a valid number and at least $0.50" });
   }
@@ -92,15 +125,15 @@ app.post("/create-checkout-session", async (req, res) => {
             product_data: {
               name: "Leaderboard Donation",
             },
-            unit_amount: amountInCents, // Correct: amount in cents, integer
+            unit_amount: amountInCents,
           },
           quantity: 1,
         },
       ],
       mode: "payment",
-      success_url: "https://rankwager.com?success=true",
+      success_url: `https://rankwager.com?success=true&id=${paymentId}`,
       cancel_url: "https://rankwager.com?canceled=true",
-      metadata: { name },
+      metadata: { name, paymentId },
     });
 
     res.json({ id: session.id });
@@ -110,8 +143,21 @@ app.post("/create-checkout-session", async (req, res) => {
   }
 });
 
-app.options("*", cors()); 
+// Get single payment by id
+app.get("/payments/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const snapshot = await db.ref(`payments/${id}`).once("value");
+    const data = snapshot.val();
 
+    if (!data) return res.status(404).json({ error: "Payment not found" });
+
+    res.json(data);
+  } catch (error) {
+    console.error("Payment fetch error:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
@@ -119,16 +165,40 @@ app.get("/leaderboard", async (req, res) => {
     const snapshot = await db.ref("payments").once("value");
     const data = snapshot.val();
 
-    if (!data) return res.json([]);
+    if (!data) {
+      return res.json([]);
+    }
 
-    const leaderboard = Object.values(data)
-      .sort((a, b) => b.total - a.total)
-      .map(entry => ({
-        name: entry.name,
-        score: (entry.total / 100).toFixed(2),
-      }));
+    // Aggregate totals per user in dollars
+    const aggregated = {};
 
-    res.json(leaderboard);
+    for (const key in data) {
+      const entry = data[key];
+      if (!entry.name || !entry.total) continue;
+
+      if (!aggregated[entry.name]) {
+        aggregated[entry.name] = 0;
+      }
+
+      aggregated[entry.name] += entry.total; // total already in dollars
+    }
+
+    // Sort descending by total
+    const leaderboard = Object.entries(aggregated)
+      .map(([name, total]) => ({
+        name,
+        score: total.toFixed(2),
+      }))
+      .sort((a, b) => parseFloat(b.score) - parseFloat(a.score));
+
+    // Add ranks and tier
+    const ranked = leaderboard.map((entry, index) => ({
+      rank: index + 1,
+      ...entry,
+      tier: getTier(parseFloat(entry.score)),
+    }));
+
+    res.json(ranked);
   } catch (error) {
     console.error("Leaderboard fetch error:", error);
     res.status(500).json({ error: "Failed to fetch leaderboard" });
