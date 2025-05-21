@@ -5,8 +5,35 @@ import bodyParser from "body-parser";
 import fs from "fs";
 import cors from "cors";
 import { v4 as uuidv4 } from "uuid";
+import rateLimit from "express-rate-limit";
 
 const app = express();
+
+// General rate limiter for all routes
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many requests. Please try again later.",
+  },
+});
+
+// Stricter rate limiter for donations
+const donationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // Limit each IP to 5 requests per hour
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many donation attempts. Please try again in an hour.",
+  },
+});
+
+app.use(generalLimiter); // Apply general limiter globally
+
+
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -101,7 +128,7 @@ app.post("/webhook", bodyParser.raw({ type: "application/json" }), async (req, r
 });
 
 // Stripe Checkout session route
-app.post("/create-checkout-session", async (req, res) => {
+app.post("/create-checkout-session", donationLimiter, async (req, res) => {
   const { name, amount, token } = req.body;
   const paymentId = uuidv4();
 
