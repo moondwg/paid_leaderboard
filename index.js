@@ -276,7 +276,7 @@ app.get("/stats", async (req, res) => {
       const entry = data[key];
       if (!entry.total) continue;
 
-      const tier = getTier(entry.total);
+      const tier = getTier(entry.total / 100);
 
       if (tier === "Whale") whaleCount++;
       else if (tier === "Shark") sharkCount++;
