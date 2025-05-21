@@ -254,6 +254,60 @@ app.get("/leaderboard", async (req, res) => {
   }
 });
 
+app.get("/stats", async (req, res) => {
+  try {
+    const snapshot = await db.ref("payments").once("value");
+    const data = snapshot.val();
+
+    if (!data) {
+      return res.json({
+        shrimpCount: 0,
+        sharkCount: 0,
+        whaleCount: 0,
+        totalMatches: 0,
+      });
+    }
+
+    const totalsByName = {};
+
+    // Aggregate donation totals by name
+    for (const key in data) {
+      const entry = data[key];
+      if (!entry.name || !entry.total) continue;
+
+      if (!totalsByName[entry.name]) {
+        totalsByName[entry.name] = 0;
+      }
+
+      totalsByName[entry.name] += entry.total;
+    }
+
+    let shrimpCount = 0;
+    let sharkCount = 0;
+    let whaleCount = 0;
+
+    for (const name in totalsByName) {
+      const total = totalsByName[name];
+      if (total >= 200) whaleCount++;
+      else if (total >= 50) sharkCount++;
+      else if (total >= 1) shrimpCount++;
+    }
+
+    const totalMatches = Object.keys(data).length;
+
+    res.json({
+      shrimpCount,
+      sharkCount,
+      whaleCount,
+      totalMatches,
+    });
+  } catch (error) {
+    console.error("Stats fetch error:", error.message);
+    res.status(500).json({ error: "Failed to fetch stats" });
+  }
+});
+
+
 app.get("/", (req, res) => res.send("Stripe Webhook Server Running"));
 
 const PORT = process.env.PORT || 3000;
