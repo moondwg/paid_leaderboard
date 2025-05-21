@@ -270,16 +270,17 @@ app.get("/stats", async (req, res) => {
 
     const totalsByName = {};
 
-    // Aggregate donation totals by name
     for (const key in data) {
       const entry = data[key];
       if (!entry.name || !entry.total) continue;
 
-      if (!totalsByName[entry.name]) {
-        totalsByName[entry.name] = 0;
+      const name = entry.name.trim().toLowerCase(); // Normalize
+
+      if (!totalsByName[name]) {
+        totalsByName[name] = 0;
       }
 
-      totalsByName[entry.name] += entry.total;
+      totalsByName[name] += entry.total;
     }
 
     let shrimpCount = 0;
@@ -287,10 +288,11 @@ app.get("/stats", async (req, res) => {
     let whaleCount = 0;
 
     for (const name in totalsByName) {
-      const total = totalsByName[name];
-      if (total >= 200) whaleCount++;
-      else if (total >= 50) sharkCount++;
-      else if (total >= 1) shrimpCount++;
+      const tier = getTier(totalsByName[name]);
+
+      if (tier === "Whale") whaleCount++;
+      else if (tier === "Shark") sharkCount++;
+      else if (tier === "Shrimp") shrimpCount++;
     }
 
     const totalMatches = Object.keys(data).length;
