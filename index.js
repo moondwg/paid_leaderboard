@@ -211,6 +211,7 @@ app.get("/payments/:id", async (req, res) => {
 // Leaderboard data
 app.get("/leaderboard", async (req, res) => {
   try {
+    res.setHeader("Cache-Control", "public, max-age=15");
     const snapshot = await db.ref("payments").once("value");
     const data = snapshot.val();
 
