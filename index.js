@@ -246,7 +246,8 @@ app.get("/leaderboard", async (req, res) => {
       ...entry,
       tier: getTier(parseFloat(entry.score)),
     }));
-
+    await db.ref("leaderboard").set(ranked);
+    
     res.json(ranked);
   } catch (error) {
     console.error("Leaderboard fetch error:", error);
